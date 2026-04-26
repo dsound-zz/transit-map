@@ -8,10 +8,13 @@
  *   npx tsx scripts/generate-gtfs-lookups.ts
  *
  * Outputs:
- *   data/stops.json        - { [stopId]: { name, lat, lon, parentStation? } }
- *   data/shapes.json       - { [shapeId]: [{ lat, lon, seq, dist }] }
- *   data/trip-shapes.json  - { [tripId]: shapeId }
+ *   data/stops.json          - { [stopId]: { name, lat, lon, parentStation? } }
+ *   data/shapes.json         - { [shapeId]: [{ lat, lon, seq }] }
+ *   data/trip-shapes.json    - { [tripId]: shapeId }
  *   data/stop-sequences.json - { [tripId]: [stopId1, stopId2, ...] }
+ *   data/route-shapes.json   - [{ routeId, directionId, coordinates: [lon,lat][] }]
+ *                              One entry per route+direction, using the shape with the
+ *                              most points (longest full-length variant, not a stub).
  */
 
 import { mkdirSync, existsSync, readFileSync } from 'fs';
@@ -86,6 +89,10 @@ async function processFeeds() {
   const allShapes: Record<string, { lat: number; lon: number; seq: number }[]> = {};
   const tripShapes: Record<string, string> = {};
   const stopSequences: Record<string, string[]> = {};
+  // Best shape per "feedName:routeId_directionId": the shape with the most points.
+  // Feed name is included in the key so MNR/LIRR numeric route IDs (1, 2, 3…)
+  // don't overwrite subway routes with the same IDs.
+  const bestRouteShapes: Record<string, { feedSource: string; routeId: string; directionId: number; shapeId: string; pointCount: number }> = {};
 
   for (const [feedName, url] of Object.entries(STATIC_GTFS_URLS)) {
     try {
@@ -115,8 +122,9 @@ async function processFeeds() {
         for (const row of rows) {
           const shapeId = row['shape_id'];
           if (!shapeId) continue;
-          if (!allShapes[shapeId]) allShapes[shapeId] = [];
-          allShapes[shapeId].push({
+          const nsShapeId = `${feedName}:${shapeId}`;
+          if (!allShapes[nsShapeId]) allShapes[nsShapeId] = [];
+          allShapes[nsShapeId].push({
             lat: parseFloat(row['shape_pt_lat']),
             lon: parseFloat(row['shape_pt_lon']),
             seq: parseInt(row['shape_pt_sequence'], 10),
@@ -128,13 +136,32 @@ async function processFeeds() {
         console.log(`  ${feedName}: ${Object.keys(allShapes).length} shapes parsed`);
       }
 
-      // ── Parse trips.txt (trip -> shape mapping) ──
+      // ── Parse trips.txt (trip -> shape mapping + best shape per route+direction) ──
       const tripsPath = join(dir, 'trips.txt');
       if (existsSync(tripsPath)) {
         const rows = parseCSV(readFileSync(tripsPath, 'utf8'));
         for (const row of rows) {
-          if (row['trip_id'] && row['shape_id']) {
-            tripShapes[row['trip_id']] = row['shape_id'];
+          const tripId = row['trip_id'];
+          const shapeId = row['shape_id'];
+          if (tripId && shapeId) {
+            tripShapes[`${feedName}:${tripId}`] = `${feedName}:${shapeId}`;
+          }
+          const routeId = row['route_id'];
+          const directionId = row['direction_id'] ?? '0';
+          if (routeId && shapeId) {
+            const key = `${feedName}:${routeId}_${directionId}`;
+            const nsShapeId = `${feedName}:${shapeId}`;
+            const pointCount = allShapes[nsShapeId]?.length ?? 0;
+            const current = bestRouteShapes[key];
+            if (!current || pointCount > current.pointCount) {
+              bestRouteShapes[key] = {
+                feedSource: feedName,
+                routeId,
+                directionId: parseInt(directionId, 10),
+                shapeId: nsShapeId,
+                pointCount,
+              };
+            }
           }
         }
       }
@@ -147,15 +174,16 @@ async function processFeeds() {
         for (const row of rows) {
           const tripId = row['trip_id'];
           if (!tripId) continue;
-          if (!tripStops[tripId]) tripStops[tripId] = [];
-          tripStops[tripId].push({
+          const nsTripId = `${feedName}:${tripId}`;
+          if (!tripStops[nsTripId]) tripStops[nsTripId] = [];
+          tripStops[nsTripId].push({
             stopId: row['stop_id'],
             seq: parseInt(row['stop_sequence'], 10),
           });
         }
-        for (const [tripId, stops] of Object.entries(tripStops)) {
+        for (const [nsTripId, stops] of Object.entries(tripStops)) {
           stops.sort((a, b) => a.seq - b.seq);
-          stopSequences[tripId] = stops.map(s => s.stopId);
+          stopSequences[nsTripId] = stops.map(s => s.stopId);
         }
         console.log(`  ${feedName}: ${Object.keys(tripStops).length} trip stop sequences parsed`);
       }
@@ -164,16 +192,31 @@ async function processFeeds() {
     }
   }
 
+  // Build route-shapes: one entry per route+direction using the longest shape variant.
+  const routeShapeEntries: { feedSource: string; routeId: string; directionId: number; coordinates: [number, number][] }[] = [];
+  for (const { feedSource, routeId, directionId, shapeId } of Object.values(bestRouteShapes)) {
+    const points = allShapes[shapeId];
+    if (!points || points.length === 0) continue;
+    routeShapeEntries.push({
+      feedSource,
+      routeId,
+      directionId,
+      coordinates: points.map(p => [p.lon, p.lat]),
+    });
+  }
+
   await writeFile(join(OUT_DIR, 'stops.json'), JSON.stringify(allStops));
   await writeFile(join(OUT_DIR, 'shapes.json'), JSON.stringify(allShapes));
   await writeFile(join(OUT_DIR, 'trip-shapes.json'), JSON.stringify(tripShapes));
   await writeFile(join(OUT_DIR, 'stop-sequences.json'), JSON.stringify(stopSequences));
+  await writeFile(join(OUT_DIR, 'route-shapes.json'), JSON.stringify(routeShapeEntries));
 
   console.log('\nDone! Files written to data/');
   console.log(`  stops.json: ${Object.keys(allStops).length} stops`);
   console.log(`  shapes.json: ${Object.keys(allShapes).length} shapes`);
   console.log(`  trip-shapes.json: ${Object.keys(tripShapes).length} trip->shape mappings`);
   console.log(`  stop-sequences.json: ${Object.keys(stopSequences).length} trip->stop sequences`);
+  console.log(`  route-shapes.json: ${routeShapeEntries.length} route+direction lines`);
 
   execSync(`rm -rf "${TMP_DIR}"`);
 }

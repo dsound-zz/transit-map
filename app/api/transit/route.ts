@@ -60,10 +60,12 @@ async function fetchFeed(
       return [];
     }
     const buffer = await res.arrayBuffer();
-    const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
+    const bytes = new Uint8Array(buffer);
+    const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(bytes);
     return feed.entity;
   } catch (err) {
-    console.warn(`Feed ${url} failed:`, err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`Feed ${url} skipped: ${message}`);
     return [];
   }
 }
@@ -72,6 +74,7 @@ async function fetchFeed(
 
 function resolvePosition(
   entity: GtfsRealtimeBindings.transit_realtime.IFeedEntity,
+  feedSource: string,
 ): { lat: number; lon: number } | null {
   const vehicle = entity.vehicle;
   if (!vehicle) return null;
@@ -97,9 +100,9 @@ function resolvePosition(
   const tripId = vehicle.trip?.tripId;
   if (!tripId) return snapToStop(stopsMap, stopId);
 
-  const shapeId = tripShapes[tripId];
+  const shapeId = tripShapes[`${feedSource}:${tripId}`];
   const shapePoints = shapeId ? shapesMap.get(shapeId) : undefined;
-  const sequence = stopSequences[tripId];
+  const sequence = stopSequences[`${feedSource}:${tripId}`];
 
   if (!shapePoints || !sequence) {
     return snapToStop(stopsMap, stopId);
@@ -157,7 +160,7 @@ export async function GET() {
       if (!entity.vehicle) continue;
 
       const routeId = entity.vehicle.trip?.routeId ?? '';
-      const pos = resolvePosition(entity);
+      const pos = resolvePosition(entity, feedSource);
       if (!pos) continue;
 
       features.push({

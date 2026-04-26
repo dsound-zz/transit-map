@@ -64,3 +64,23 @@ export interface VehicleFeatureCollection {
   type: 'FeatureCollection';
   features: VehicleFeature[];
 }
+
+// ─── Route Line GeoJSON ───
+
+export interface RouteLineFeature {
+  type: 'Feature';
+  geometry: {
+    type: 'LineString';
+    coordinates: [number, number][]; // [lon, lat]
+  };
+  properties: {
+    routeId: string;
+    directionId: number;
+    color: string;
+  };
+}
+
+export interface RouteLineFeatureCollection {
+  type: 'FeatureCollection';
+  features: RouteLineFeature[];
+}
