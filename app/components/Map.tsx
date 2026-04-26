@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Map, { NavigationControl, Source, Layer } from 'react-map-gl/maplibre';
 import type { LayerProps } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { VehicleFeatureCollection, RouteLineFeatureCollection } from '@/types/transit';
+import type { VehicleFeature, VehicleFeatureCollection, RouteLineFeatureCollection } from '@/types/transit';
 
 const POLL_INTERVAL_MS = 15_000;
 
@@ -11,9 +11,23 @@ const FEEDS = [
   { id: 'subway',  label: 'Subway' },
   { id: 'mnr',     label: 'Metro-North' },
   { id: 'lirr',    label: 'LIRR' },
+  { id: 'amtrak',  label: 'Amtrak' },
 ] as const;
 
 type FeedId = typeof FEEDS[number]['id'];
+
+// OpenRailwayMap tiles — three subdomains for load balancing
+const RAIL_INFRA_TILES = [
+  'https://a.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+  'https://b.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+  'https://c.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+];
+
+const railInfraLayer: LayerProps = {
+  id: 'rail-infrastructure',
+  type: 'raster',
+  paint: { 'raster-opacity': 0.35 },
+};
 
 const routeLineLayer: LayerProps = {
   id: 'route-lines',
@@ -36,19 +50,22 @@ const vehicleLayer: LayerProps = {
   },
 };
 
-type VehicleLoadState =
+type TransitLoadState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
   | { status: 'ready'; data: VehicleFeatureCollection };
 
 export default function TransitMap() {
-  const [vehicleState, setVehicleState] = useState<VehicleLoadState>({ status: 'loading' });
+  const [transitState, setTransitState] = useState<TransitLoadState>({ status: 'loading' });
+  const [amtrakFeatures, setAmtrakFeatures] = useState<VehicleFeature[]>([]);
   const [routeLines, setRouteLines] = useState<RouteLineFeatureCollection | null>(null);
   const [activeFeeds, setActiveFeeds] = useState<Record<FeedId, boolean>>({
     subway: true,
     mnr: true,
     lirr: true,
+    amtrak: true,
   });
+  const [showRailInfrastructure, setShowRailInfrastructure] = useState(true);
 
   const toggleFeed = useCallback((id: FeedId) => {
     setActiveFeeds(prev => ({ ...prev, [id]: !prev[id] }));
@@ -61,37 +78,54 @@ export default function TransitMap() {
       .catch(err => console.warn('Route lines unavailable:', err));
   }, []);
 
-  const fetchVehicles = useCallback(async () => {
+  const fetchTransit = useCallback(async () => {
     try {
       const res = await fetch('/api/transit');
       if (!res.ok) {
         const body: { error?: string } = await res.json().catch(() => ({}));
-        setVehicleState({ status: 'error', message: body.error ?? `HTTP ${res.status}` });
+        setTransitState({ status: 'error', message: body.error ?? `HTTP ${res.status}` });
         return;
       }
       const data: VehicleFeatureCollection = await res.json();
-      setVehicleState({ status: 'ready', data });
+      setTransitState({ status: 'ready', data });
     } catch (err) {
-      setVehicleState({
+      setTransitState({
         status: 'error',
         message: err instanceof Error ? err.message : 'Network error',
       });
     }
   }, []);
 
-  useEffect(() => {
-    fetchVehicles();
-    const interval = setInterval(fetchVehicles, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [fetchVehicles]);
+  const fetchAmtrak = useCallback(async () => {
+    try {
+      const res = await fetch('/api/amtrak');
+      if (!res.ok) return;
+      const data: VehicleFeatureCollection = await res.json();
+      setAmtrakFeatures(data.features);
+    } catch {
+      // Amtrak is supplementary — fail silently
+    }
+  }, []);
 
-  const filteredVehicles = useMemo((): VehicleFeatureCollection | null => {
-    if (vehicleState.status !== 'ready') return null;
-    return {
-      ...vehicleState.data,
-      features: vehicleState.data.features.filter(f => activeFeeds[f.properties.feedSource as FeedId]),
-    };
-  }, [vehicleState, activeFeeds]);
+  useEffect(() => {
+    fetchTransit();
+    const interval = setInterval(fetchTransit, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [fetchTransit]);
+
+  useEffect(() => {
+    fetchAmtrak();
+    const interval = setInterval(fetchAmtrak, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [fetchAmtrak]);
+
+  const filteredVehicles = useMemo((): VehicleFeatureCollection => {
+    const transitFeatures = transitState.status === 'ready'
+      ? transitState.data.features.filter(f => activeFeeds[f.properties.feedSource as FeedId])
+      : [];
+    const filteredAmtrak = activeFeeds.amtrak ? amtrakFeatures : [];
+    return { type: 'FeatureCollection', features: [...transitFeatures, ...filteredAmtrak] };
+  }, [transitState, amtrakFeatures, activeFeeds]);
 
   const filteredRoutes = useMemo((): RouteLineFeatureCollection | null => {
     if (!routeLines) return null;
@@ -113,20 +147,33 @@ export default function TransitMap() {
       >
         <NavigationControl position="top-right" />
 
+        {/* Rail infrastructure raster — rendered first so it sits beneath everything */}
+        {showRailInfrastructure && (
+          <Source
+            id="rail-infrastructure-source"
+            type="raster"
+            tiles={RAIL_INFRA_TILES}
+            tileSize={256}
+            attribution="© <a href='https://www.openrailwaymap.org/'>OpenRailwayMap</a> CC-BY-SA 2.0"
+          >
+            <Layer {...railInfraLayer} />
+          </Source>
+        )}
+
         {filteredRoutes && filteredRoutes.features.length > 0 && (
           <Source id="routes" type="geojson" data={filteredRoutes}>
             <Layer {...routeLineLayer} />
           </Source>
         )}
 
-        {filteredVehicles && filteredVehicles.features.length > 0 && (
+        {filteredVehicles.features.length > 0 && (
           <Source id="vehicles" type="geojson" data={filteredVehicles}>
             <Layer {...vehicleLayer} />
           </Source>
         )}
       </Map>
 
-      {/* Feed filter toggles */}
+      {/* Feed filter toggles — top left */}
       <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
         {FEEDS.map(({ id, label }) => (
           <button
@@ -143,23 +190,37 @@ export default function TransitMap() {
         ))}
       </div>
 
-      {vehicleState.status === 'loading' && (
+      {/* Rail infrastructure toggle — bottom left */}
+      <div className="absolute bottom-4 left-4 z-10">
+        <button
+          onClick={() => setShowRailInfrastructure(prev => !prev)}
+          className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+            showRailInfrastructure
+              ? 'bg-white/20 text-white'
+              : 'bg-black/60 text-white/30'
+          }`}
+        >
+          Rail infrastructure
+        </button>
+      </div>
+
+      {transitState.status === 'loading' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 rounded bg-black/70 px-4 py-2 text-sm text-white">
           Loading transit data…
         </div>
       )}
 
-      {vehicleState.status === 'error' && (
+      {transitState.status === 'error' && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 rounded bg-red-700 px-4 py-2 text-sm text-white">
-          {vehicleState.message}
+          {transitState.message}
         </div>
       )}
 
-      {vehicleState.status === 'ready' && (
+      {transitState.status === 'ready' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 rounded bg-black/70 px-4 py-2 text-sm text-white">
-          {filteredVehicles?.features.length === 0
+          {filteredVehicles.features.length === 0
             ? 'No vehicles found'
-            : `${filteredVehicles?.features.length} vehicles`}
+            : `${filteredVehicles.features.length} vehicles`}
         </div>
       )}
     </div>

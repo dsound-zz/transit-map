@@ -81,6 +81,53 @@ async function downloadAndExtract(name: string, url: string) {
   return extractDir;
 }
 
+type RouteShapeEntry = { feedSource: string; routeId: string; directionId: number; coordinates: [number, number][] };
+
+interface NYOpenDataRecord {
+  object_id: string;
+  route_name: string;
+  route_code: string;
+  geometry: {
+    type: 'MultiLineString';
+    coordinates: [number, number][][];
+  };
+}
+
+// The MTA's static LIRR GTFS omits shapes.txt, so we fetch branch geometry
+// from the NY Open Data "MTA Rail Branches" dataset instead.
+// Each MultiLineString record becomes one entry per LineString segment.
+async function fetchLIRRBranchGeometry(): Promise<RouteShapeEntry[]> {
+  const url = 'https://data.ny.gov/resource/2vcb-zrh4.json?$limit=100';
+  console.log('Fetching LIRR branch geometry from NY Open Data...');
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const records = await res.json() as NYOpenDataRecord[];
+    const entries: RouteShapeEntry[] = [];
+
+    for (const record of records) {
+      if (!record.object_id.startsWith('LIRR_')) continue;
+      if (record.geometry?.type !== 'MultiLineString') continue;
+
+      for (const ring of record.geometry.coordinates) {
+        entries.push({
+          feedSource: 'lirr',
+          routeId: record.route_code,
+          directionId: 0,
+          coordinates: ring,
+        });
+      }
+    }
+
+    console.log(`  lirr: ${entries.length} branch segments from NY Open Data`);
+    return entries;
+  } catch (err) {
+    console.warn('  lirr: failed to fetch branch geometry —', err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
 async function processFeeds() {
   ensureDir(OUT_DIR);
   ensureDir(TMP_DIR);
@@ -204,6 +251,11 @@ async function processFeeds() {
       coordinates: points.map(p => [p.lon, p.lat]),
     });
   }
+
+  // Supplement with LIRR branch geometry from NY Open Data, since the MTA's
+  // static LIRR GTFS does not include shapes.txt.
+  const lirrEntries = await fetchLIRRBranchGeometry();
+  routeShapeEntries.push(...lirrEntries);
 
   await writeFile(join(OUT_DIR, 'stops.json'), JSON.stringify(allStops));
   await writeFile(join(OUT_DIR, 'shapes.json'), JSON.stringify(allShapes));
