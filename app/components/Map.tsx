@@ -1,11 +1,19 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Map, { NavigationControl, Source, Layer } from 'react-map-gl/maplibre';
 import type { LayerProps } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { VehicleFeatureCollection, RouteLineFeatureCollection } from '@/types/transit';
 
 const POLL_INTERVAL_MS = 15_000;
+
+const FEEDS = [
+  { id: 'subway',  label: 'Subway' },
+  { id: 'mnr',     label: 'Metro-North' },
+  { id: 'lirr',    label: 'LIRR' },
+] as const;
+
+type FeedId = typeof FEEDS[number]['id'];
 
 const routeLineLayer: LayerProps = {
   id: 'route-lines',
@@ -36,8 +44,16 @@ type VehicleLoadState =
 export default function TransitMap() {
   const [vehicleState, setVehicleState] = useState<VehicleLoadState>({ status: 'loading' });
   const [routeLines, setRouteLines] = useState<RouteLineFeatureCollection | null>(null);
+  const [activeFeeds, setActiveFeeds] = useState<Record<FeedId, boolean>>({
+    subway: true,
+    mnr: true,
+    lirr: true,
+  });
 
-  // Fetch route lines once on mount — static data, no need to poll
+  const toggleFeed = useCallback((id: FeedId) => {
+    setActiveFeeds(prev => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+
   useEffect(() => {
     fetch('/api/routes')
       .then(res => res.ok ? res.json() as Promise<RouteLineFeatureCollection> : Promise.reject(res.status))
@@ -69,6 +85,22 @@ export default function TransitMap() {
     return () => clearInterval(interval);
   }, [fetchVehicles]);
 
+  const filteredVehicles = useMemo((): VehicleFeatureCollection | null => {
+    if (vehicleState.status !== 'ready') return null;
+    return {
+      ...vehicleState.data,
+      features: vehicleState.data.features.filter(f => activeFeeds[f.properties.feedSource as FeedId]),
+    };
+  }, [vehicleState, activeFeeds]);
+
+  const filteredRoutes = useMemo((): RouteLineFeatureCollection | null => {
+    if (!routeLines) return null;
+    return {
+      ...routeLines,
+      features: routeLines.features.filter(f => activeFeeds[f.properties.feedSource as FeedId]),
+    };
+  }, [routeLines, activeFeeds]);
+
   return (
     <div className="w-full h-screen relative">
       <Map
@@ -81,19 +113,35 @@ export default function TransitMap() {
       >
         <NavigationControl position="top-right" />
 
-        {/* Route lines first so vehicle dots render on top */}
-        {routeLines && routeLines.features.length > 0 && (
-          <Source id="routes" type="geojson" data={routeLines}>
+        {filteredRoutes && filteredRoutes.features.length > 0 && (
+          <Source id="routes" type="geojson" data={filteredRoutes}>
             <Layer {...routeLineLayer} />
           </Source>
         )}
 
-        {vehicleState.status === 'ready' && vehicleState.data.features.length > 0 && (
-          <Source id="vehicles" type="geojson" data={vehicleState.data}>
+        {filteredVehicles && filteredVehicles.features.length > 0 && (
+          <Source id="vehicles" type="geojson" data={filteredVehicles}>
             <Layer {...vehicleLayer} />
           </Source>
         )}
       </Map>
+
+      {/* Feed filter toggles */}
+      <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
+        {FEEDS.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => toggleFeed(id)}
+            className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+              activeFeeds[id]
+                ? 'bg-white text-black'
+                : 'bg-black/60 text-white/40'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {vehicleState.status === 'loading' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 rounded bg-black/70 px-4 py-2 text-sm text-white">
@@ -109,9 +157,9 @@ export default function TransitMap() {
 
       {vehicleState.status === 'ready' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 rounded bg-black/70 px-4 py-2 text-sm text-white">
-          {vehicleState.data.features.length === 0
+          {filteredVehicles?.features.length === 0
             ? 'No vehicles found'
-            : `${vehicleState.data.features.length} vehicles`}
+            : `${filteredVehicles?.features.length} vehicles`}
         </div>
       )}
     </div>

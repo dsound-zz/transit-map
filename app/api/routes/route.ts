@@ -29,11 +29,9 @@ export async function GET(): Promise<NextResponse<RouteLineFeatureCollection>> {
       type: 'Feature',
       geometry: { type: 'LineString', coordinates },
       properties: {
+        feedSource,
         routeId,
         directionId,
-        // Subway routes are looked up by routeId ('A', '1', 'L'…).
-        // Commuter rail feeds use the same numeric IDs as subway, so fall back
-        // to the feed-level color key ('MNR', 'LIRR') instead.
         color: getLineColor(feedSource === 'subway' ? routeId : feedSource.toUpperCase()),
       },
     })),

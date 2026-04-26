@@ -74,6 +74,7 @@ export interface RouteLineFeature {
     coordinates: [number, number][]; // [lon, lat]
   };
   properties: {
+    feedSource: string;
     routeId: string;
     directionId: number;
     color: string;
