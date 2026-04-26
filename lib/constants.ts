@@ -29,6 +29,18 @@ export const LINE_COLORS: Record<string, string> = {
   'LIRR': '#0039A6',
   // NJ Transit (general)
   'NJT': '#003DA5',
+  // Metra lines (Chicago)
+  'BNSF':  '#7B2D8B',  // BNSF Railway — purple
+  'UP-N':  '#FFC72C',  // Union Pacific North — gold
+  'UP-NW': '#FFC72C',  // Union Pacific Northwest — gold
+  'UP-W':  '#009CDE',  // Union Pacific West — blue
+  'MD-N':  '#F26522',  // Milwaukee District North — orange
+  'MD-W':  '#F26522',  // Milwaukee District West — orange
+  'NCS':   '#008745',  // North Central Service — green
+  'SWS':   '#DD1F26',  // SouthWest Service — red
+  'RI':    '#C01933',  // Rock Island District — crimson
+  'ME':    '#003DA5',  // Metra Electric District — blue
+  'HC':    '#006B3D',  // Heritage Corridor — dark green
 };
 
 export const DEFAULT_COLOR = '#FFFFFF';

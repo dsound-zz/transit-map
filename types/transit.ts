@@ -40,7 +40,7 @@ export interface VehiclePosition {
   currentStatus: VehicleStatus;
   currentStopId: string;
   timestamp: number;
-  feedSource: 'subway' | 'mnr' | 'lirr' | 'njt';
+  feedSource: 'subway' | 'mnr' | 'lirr' | 'njt' | 'metra';
 }
 
 // ─── GeoJSON for the frontend ───

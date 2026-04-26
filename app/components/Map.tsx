@@ -4,6 +4,7 @@ import Map, { NavigationControl, Source, Layer } from 'react-map-gl/maplibre';
 import type { LayerProps } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { VehicleFeature, VehicleFeatureCollection, RouteLineFeatureCollection } from '@/types/transit';
+import NarnLayer from './NarnLayer';
 
 const POLL_INTERVAL_MS = 15_000;
 
@@ -12,6 +13,7 @@ const FEEDS = [
   { id: 'mnr',     label: 'Metro-North' },
   { id: 'lirr',    label: 'LIRR' },
   { id: 'amtrak',  label: 'Amtrak' },
+  { id: 'metra',   label: 'Metra' },
 ] as const;
 
 type FeedId = typeof FEEDS[number]['id'];
@@ -55,17 +57,22 @@ type TransitLoadState =
   | { status: 'error'; message: string }
   | { status: 'ready'; data: VehicleFeatureCollection };
 
+const NARN_TILES_URL = '/api/tiles/narn/{z}/{x}/{y}';
+
 export default function TransitMap() {
   const [transitState, setTransitState] = useState<TransitLoadState>({ status: 'loading' });
   const [amtrakFeatures, setAmtrakFeatures] = useState<VehicleFeature[]>([]);
+  const [metraFeatures, setMetraFeatures] = useState<VehicleFeature[]>([]);
   const [routeLines, setRouteLines] = useState<RouteLineFeatureCollection | null>(null);
   const [activeFeeds, setActiveFeeds] = useState<Record<FeedId, boolean>>({
     subway: true,
     mnr: true,
     lirr: true,
     amtrak: true,
+    metra: true,
   });
   const [showRailInfrastructure, setShowRailInfrastructure] = useState(true);
+  const [showClassIFreight, setShowClassIFreight] = useState(false);
 
   const toggleFeed = useCallback((id: FeedId) => {
     setActiveFeeds(prev => ({ ...prev, [id]: !prev[id] }));
@@ -107,6 +114,17 @@ export default function TransitMap() {
     }
   }, []);
 
+  const fetchMetra = useCallback(async () => {
+    try {
+      const res = await fetch('/api/metra');
+      if (!res.ok) return;
+      const data: VehicleFeatureCollection = await res.json();
+      setMetraFeatures(data.features);
+    } catch {
+      // Metra is supplementary — fail silently
+    }
+  }, []);
+
   useEffect(() => {
     fetchTransit();
     const interval = setInterval(fetchTransit, POLL_INTERVAL_MS);
@@ -119,13 +137,23 @@ export default function TransitMap() {
     return () => clearInterval(interval);
   }, [fetchAmtrak]);
 
+  useEffect(() => {
+    fetchMetra();
+    const interval = setInterval(fetchMetra, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [fetchMetra]);
+
   const filteredVehicles = useMemo((): VehicleFeatureCollection => {
     const transitFeatures = transitState.status === 'ready'
       ? transitState.data.features.filter(f => activeFeeds[f.properties.feedSource as FeedId])
       : [];
     const filteredAmtrak = activeFeeds.amtrak ? amtrakFeatures : [];
-    return { type: 'FeatureCollection', features: [...transitFeatures, ...filteredAmtrak] };
-  }, [transitState, amtrakFeatures, activeFeeds]);
+    const filteredMetra = activeFeeds.metra ? metraFeatures : [];
+    return {
+      type: 'FeatureCollection',
+      features: [...transitFeatures, ...filteredAmtrak, ...filteredMetra],
+    };
+  }, [transitState, amtrakFeatures, metraFeatures, activeFeeds]);
 
   const filteredRoutes = useMemo((): RouteLineFeatureCollection | null => {
     if (!routeLines) return null;
@@ -160,6 +188,9 @@ export default function TransitMap() {
           </Source>
         )}
 
+        {/* NARN Class I freight rail — vector tiles, color-coded by railroad */}
+        {showClassIFreight && <NarnLayer tilesUrl={NARN_TILES_URL} />}
+
         {filteredRoutes && filteredRoutes.features.length > 0 && (
           <Source id="routes" type="geojson" data={filteredRoutes}>
             <Layer {...routeLineLayer} />
@@ -190,8 +221,8 @@ export default function TransitMap() {
         ))}
       </div>
 
-      {/* Rail infrastructure toggle — bottom left */}
-      <div className="absolute bottom-4 left-4 z-10">
+      {/* Layer toggles — bottom left */}
+      <div className="absolute bottom-4 left-4 z-10 flex flex-col gap-2">
         <button
           onClick={() => setShowRailInfrastructure(prev => !prev)}
           className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -201,6 +232,16 @@ export default function TransitMap() {
           }`}
         >
           Rail infrastructure
+        </button>
+        <button
+          onClick={() => setShowClassIFreight(prev => !prev)}
+          className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+            showClassIFreight
+              ? 'bg-white/20 text-white'
+              : 'bg-black/60 text-white/30'
+          }`}
+        >
+          Class I freight
         </button>
       </div>
 

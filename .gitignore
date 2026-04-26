@@ -43,3 +43,6 @@ next-env.d.ts
 # generated GTFS static lookup data
 /data/*.json
 /.tmp-gtfs
+
+# large binary tile data — too big for GitHub (use Git LFS or a CDN)
+/public/data/
