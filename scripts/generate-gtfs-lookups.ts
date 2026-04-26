@@ -22,10 +22,16 @@ import { writeFile } from 'fs/promises';
 import { join } from 'path';
 import { execSync } from 'child_process';
 
+const METRA_API_KEY = process.env.METRA_API_KEY;
+const METRA_GTFS_URL = METRA_API_KEY
+  ? `https://gtfspublic.metrarr.com/gtfs/public/schedule.zip?api_token=${METRA_API_KEY}`
+  : null;
+
 const STATIC_GTFS_URLS: Record<string, string> = {
   subway: 'http://web.mta.info/developers/data/nyct/subway/google_transit.zip',
   mnr: 'http://web.mta.info/developers/data/mnr/google_transit.zip',
   lirr: 'http://web.mta.info/developers/data/lirr/google_transit.zip',
+  ...(METRA_GTFS_URL ? { metra: METRA_GTFS_URL } : {}),
 };
 
 const OUT_DIR = join(process.cwd(), 'data');

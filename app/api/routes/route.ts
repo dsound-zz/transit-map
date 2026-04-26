@@ -32,7 +32,10 @@ export async function GET(): Promise<NextResponse<RouteLineFeatureCollection>> {
         feedSource,
         routeId,
         directionId,
-        color: getLineColor(feedSource === 'subway' ? routeId : feedSource.toUpperCase()),
+        // subway and metra have per-line colors; other agencies use a single agency color
+        color: getLineColor(
+          feedSource === 'subway' || feedSource === 'metra' ? routeId : feedSource.toUpperCase(),
+        ),
       },
     })),
   };
