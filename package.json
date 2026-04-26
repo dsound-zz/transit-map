@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "npx tsx scripts/generate-gtfs-lookups.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
