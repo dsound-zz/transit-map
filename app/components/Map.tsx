@@ -19,6 +19,10 @@ const FEEDS = [
 
 type FeedId = typeof FEEDS[number]['id'];
 
+// Set NEXT_PUBLIC_NARN_PMTILES_URL to a public R2/S3/CDN URL for Vercel deployments.
+// Unset → falls back to the local /api/tiles server route (dev only).
+const REMOTE_PMTILES_URL = process.env.NEXT_PUBLIC_NARN_PMTILES_URL;
+
 const CITIES = [
   { id: 'nyc',     label: 'NYC',     center: [-74.0, 40.75]  as [number, number], zoom: 11 },
   { id: 'chicago', label: 'Chicago', center: [-87.65, 41.85] as [number, number], zoom: 11 },
@@ -81,11 +85,15 @@ export default function TransitMap() {
   });
   const [showRailInfrastructure, setShowRailInfrastructure] = useState(true);
   const [showClassIFreight, setShowClassIFreight] = useState(false);
-  // MapLibre fetches tiles in a web worker — relative URLs can't be resolved there.
-  // Set the absolute origin after mount so SSR stays safe.
-  const [narnTilesUrl, setNarnTilesUrl] = useState('');
+  // Remote URL (pmtiles://) is available immediately from the env var.
+  // Local server tiles need window.location.origin, so they're set after mount.
+  const [narnTilesUrl, setNarnTilesUrl] = useState(
+    REMOTE_PMTILES_URL ? `pmtiles://${REMOTE_PMTILES_URL}` : '',
+  );
   useEffect(() => {
-    setNarnTilesUrl(`${window.location.origin}/api/tiles/narn/{z}/{x}/{y}`);
+    if (!REMOTE_PMTILES_URL) {
+      setNarnTilesUrl(`${window.location.origin}/api/tiles/narn/{z}/{x}/{y}`);
+    }
   }, []);
 
   const toggleFeed = useCallback((id: FeedId) => {
