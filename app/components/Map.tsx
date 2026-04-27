@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Map, { NavigationControl, Source, Layer } from 'react-map-gl/maplibre';
-import type { LayerProps } from 'react-map-gl/maplibre';
+import type { LayerProps, MapRef } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { VehicleFeature, VehicleFeatureCollection, RouteLineFeatureCollection } from '@/types/transit';
 import NarnLayer from './NarnLayer';
@@ -14,9 +14,15 @@ const FEEDS = [
   { id: 'lirr',    label: 'LIRR' },
   { id: 'amtrak',  label: 'Amtrak' },
   { id: 'metra',   label: 'Metra' },
+  { id: 'cta',     label: 'CTA' },
 ] as const;
 
 type FeedId = typeof FEEDS[number]['id'];
+
+const CITIES = [
+  { id: 'nyc',     label: 'NYC',     center: [-74.0, 40.75]  as [number, number], zoom: 11 },
+  { id: 'chicago', label: 'Chicago', center: [-87.65, 41.85] as [number, number], zoom: 11 },
+] as const;
 
 // OpenRailwayMap tiles — three subdomains for load balancing
 const RAIL_INFRA_TILES = [
@@ -58,9 +64,12 @@ type TransitLoadState =
   | { status: 'ready'; data: VehicleFeatureCollection };
 
 export default function TransitMap() {
+  const mapRef = useRef<MapRef>(null);
+
   const [transitState, setTransitState] = useState<TransitLoadState>({ status: 'loading' });
   const [amtrakFeatures, setAmtrakFeatures] = useState<VehicleFeature[]>([]);
   const [metraFeatures, setMetraFeatures] = useState<VehicleFeature[]>([]);
+  const [ctaFeatures, setCtaFeatures] = useState<VehicleFeature[]>([]);
   const [routeLines, setRouteLines] = useState<RouteLineFeatureCollection | null>(null);
   const [activeFeeds, setActiveFeeds] = useState<Record<FeedId, boolean>>({
     subway: true,
@@ -68,6 +77,7 @@ export default function TransitMap() {
     lirr: true,
     amtrak: true,
     metra: true,
+    cta: true,
   });
   const [showRailInfrastructure, setShowRailInfrastructure] = useState(true);
   const [showClassIFreight, setShowClassIFreight] = useState(false);
@@ -80,6 +90,10 @@ export default function TransitMap() {
 
   const toggleFeed = useCallback((id: FeedId) => {
     setActiveFeeds(prev => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+
+  const flyToCity = useCallback((center: [number, number], zoom: number) => {
+    mapRef.current?.flyTo({ center, zoom, duration: 1800 });
   }, []);
 
   useEffect(() => {
@@ -129,6 +143,17 @@ export default function TransitMap() {
     }
   }, []);
 
+  const fetchCta = useCallback(async () => {
+    try {
+      const res = await fetch('/api/cta');
+      if (!res.ok) return;
+      const data: VehicleFeatureCollection = await res.json();
+      setCtaFeatures(data.features);
+    } catch {
+      // CTA is supplementary — fail silently
+    }
+  }, []);
+
   useEffect(() => {
     fetchTransit();
     const interval = setInterval(fetchTransit, POLL_INTERVAL_MS);
@@ -147,17 +172,24 @@ export default function TransitMap() {
     return () => clearInterval(interval);
   }, [fetchMetra]);
 
+  useEffect(() => {
+    fetchCta();
+    const interval = setInterval(fetchCta, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [fetchCta]);
+
   const filteredVehicles = useMemo((): VehicleFeatureCollection => {
     const transitFeatures = transitState.status === 'ready'
       ? transitState.data.features.filter(f => activeFeeds[f.properties.feedSource as FeedId])
       : [];
     const filteredAmtrak = activeFeeds.amtrak ? amtrakFeatures : [];
     const filteredMetra = activeFeeds.metra ? metraFeatures : [];
+    const filteredCta = activeFeeds.cta ? ctaFeatures : [];
     return {
       type: 'FeatureCollection',
-      features: [...transitFeatures, ...filteredAmtrak, ...filteredMetra],
+      features: [...transitFeatures, ...filteredAmtrak, ...filteredMetra, ...filteredCta],
     };
-  }, [transitState, amtrakFeatures, metraFeatures, activeFeeds]);
+  }, [transitState, amtrakFeatures, metraFeatures, ctaFeatures, activeFeeds]);
 
   const filteredRoutes = useMemo((): RouteLineFeatureCollection | null => {
     if (!routeLines) return null;
@@ -170,6 +202,7 @@ export default function TransitMap() {
   return (
     <div className="w-full h-screen relative">
       <Map
+        ref={mapRef}
         initialViewState={{
           longitude: -73.98,
           latitude: 40.75,
@@ -223,6 +256,19 @@ export default function TransitMap() {
             {label}
           </button>
         ))}
+
+        {/* City jump buttons */}
+        <div className="mt-1 flex gap-1">
+          {CITIES.map(({ id, label, center, zoom }) => (
+            <button
+              key={id}
+              onClick={() => flyToCity(center, zoom)}
+              className="flex-1 rounded px-2 py-1 text-xs font-medium bg-black/60 text-white/60 hover:text-white hover:bg-black/80 transition-colors"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Layer toggles — bottom left */}

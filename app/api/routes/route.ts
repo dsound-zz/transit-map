@@ -32,9 +32,15 @@ export async function GET(): Promise<NextResponse<RouteLineFeatureCollection>> {
         feedSource,
         routeId,
         directionId,
-        // subway and metra have per-line colors; other agencies use a single agency color
+        // subway and metra: per-line colors via routeId
+        // cta: per-line colors via 'CTA-{routeId}' prefix (avoids collision with NYC route IDs)
+        // other agencies: single agency color
         color: getLineColor(
-          feedSource === 'subway' || feedSource === 'metra' ? routeId : feedSource.toUpperCase(),
+          feedSource === 'subway' || feedSource === 'metra'
+            ? routeId
+            : feedSource === 'cta'
+              ? `CTA-${routeId}`
+              : feedSource.toUpperCase(),
         ),
       },
     })),

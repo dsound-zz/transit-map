@@ -29,6 +29,15 @@ export const LINE_COLORS: Record<string, string> = {
   'LIRR': '#0039A6',
   // NJ Transit (general)
   'NJT': '#003DA5',
+  // CTA L lines (Chicago) — prefixed with 'CTA-' to avoid collision with NYC route IDs
+  'CTA-Red':  '#C60C30',
+  'CTA-Blue': '#00A1DE',
+  'CTA-Brn':  '#62361B',
+  'CTA-G':    '#009B3A',
+  'CTA-Org':  '#F9461C',
+  'CTA-P':    '#522398',
+  'CTA-Pink': '#E27EA6',
+  'CTA-Y':    '#F9E300',
   // Metra lines (Chicago)
   'BNSF':  '#7B2D8B',  // BNSF Railway — purple
   'UP-N':  '#FFC72C',  // Union Pacific North — gold

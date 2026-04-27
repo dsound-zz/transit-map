@@ -31,8 +31,12 @@ const STATIC_GTFS_URLS: Record<string, string> = {
   subway: 'http://web.mta.info/developers/data/nyct/subway/google_transit.zip',
   mnr: 'http://web.mta.info/developers/data/mnr/google_transit.zip',
   lirr: 'http://web.mta.info/developers/data/lirr/google_transit.zip',
+  cta: 'https://www.transitchicago.com/downloads/sch_data/google_transit.zip',
   ...(METRA_GTFS_URL ? { metra: METRA_GTFS_URL } : {}),
 };
+
+// Feeds that bundle multiple modes (rail + bus) — only keep rail routes (type 0/1/2)
+const RAIL_ONLY_FEEDS = new Set(['cta']);
 
 const OUT_DIR = join(process.cwd(), 'data');
 const TMP_DIR = join(process.cwd(), '.tmp-gtfs');
@@ -151,6 +155,19 @@ async function processFeeds() {
     try {
       const dir = await downloadAndExtract(feedName, url);
 
+      // ── Parse routes.txt (rail-only filter for mixed-mode feeds like CTA) ──
+      const railRouteIds = new Set<string>();
+      const routesPath = join(dir, 'routes.txt');
+      if (existsSync(routesPath) && RAIL_ONLY_FEEDS.has(feedName)) {
+        const rows = parseCSV(readFileSync(routesPath, 'utf8'));
+        for (const row of rows) {
+          if (['0', '1', '2'].includes(row['route_type'])) {
+            railRouteIds.add(row['route_id']);
+          }
+        }
+        console.log(`  ${feedName}: filtering to ${railRouteIds.size} rail routes`);
+      }
+
       // ── Parse stops.txt ──
       const stopsPath = join(dir, 'stops.txt');
       if (existsSync(stopsPath)) {
@@ -202,6 +219,7 @@ async function processFeeds() {
           const routeId = row['route_id'];
           const directionId = row['direction_id'] ?? '0';
           if (routeId && shapeId) {
+            if (RAIL_ONLY_FEEDS.has(feedName) && !railRouteIds.has(routeId)) continue;
             const key = `${feedName}:${routeId}_${directionId}`;
             const nsShapeId = `${feedName}:${shapeId}`;
             const pointCount = allShapes[nsShapeId]?.length ?? 0;
