@@ -46,3 +46,4 @@ next-env.d.ts
 
 # large binary tile data — too big for GitHub (use Git LFS or a CDN)
 /public/data/
+/data/*.pmtiles

@@ -65,7 +65,9 @@ async function fetchFeed(
     return feed.entity;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`Feed ${url} skipped: ${message}`);
+    if (!url.includes('gtfs-7')) {
+      console.warn(`Feed ${url} skipped: ${message}`);
+    }
     return [];
   }
 }

@@ -6,13 +6,22 @@ import type { VehicleFeature, VehicleFeatureCollection } from '@/types/transit';
 const POSITIONS_URL = 'https://gtfspublic.metrarr.com/gtfs/public/positions';
 const TRIP_UPDATES_URL = 'https://gtfspublic.metrarr.com/gtfs/public/tripupdates';
 
-const FETCH_OPTIONS: RequestInit = {
+const POS_FETCH_OPTIONS: RequestInit = {
   cache: 'no-store',
   headers: {
     Accept: 'application/x-protobuf',
     'User-Agent': 'NYCTransitMap/1.0',
   },
-  signal: AbortSignal.timeout(10_000),
+  signal: AbortSignal.timeout(15_000),
+};
+
+const TRIP_FETCH_OPTIONS: RequestInit = {
+  cache: 'no-store',
+  headers: {
+    Accept: 'application/x-protobuf',
+    'User-Agent': 'NYCTransitMap/1.0',
+  },
+  signal: AbortSignal.timeout(5_000),
 };
 
 export async function GET() {
@@ -22,8 +31,8 @@ export async function GET() {
 
   try {
     const [posRes, tripRes] = await Promise.all([
-      fetch(positionsUrl, FETCH_OPTIONS),
-      fetch(tripUpdatesUrl, FETCH_OPTIONS).catch(() => null),
+      fetch(positionsUrl, POS_FETCH_OPTIONS),
+      fetch(tripUpdatesUrl, TRIP_FETCH_OPTIONS).catch(() => null),
     ]);
 
     if (!posRes.ok) {
@@ -91,7 +100,7 @@ export async function GET() {
       headers: { 'Cache-Control': 'public, s-maxage=25, stale-while-revalidate=30' },
     });
   } catch (err) {
-    console.error('[metra] fetch failed:', err);
+    console.error(`[metra] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     const empty: VehicleFeatureCollection = { type: 'FeatureCollection', features: [] };
     return NextResponse.json(empty, { status: 200 });
   }
