@@ -57,8 +57,6 @@ type TransitLoadState =
   | { status: 'error'; message: string }
   | { status: 'ready'; data: VehicleFeatureCollection };
 
-const NARN_TILES_URL = '/api/tiles/narn/{z}/{x}/{y}';
-
 export default function TransitMap() {
   const [transitState, setTransitState] = useState<TransitLoadState>({ status: 'loading' });
   const [amtrakFeatures, setAmtrakFeatures] = useState<VehicleFeature[]>([]);
@@ -73,6 +71,12 @@ export default function TransitMap() {
   });
   const [showRailInfrastructure, setShowRailInfrastructure] = useState(true);
   const [showClassIFreight, setShowClassIFreight] = useState(false);
+  // MapLibre fetches tiles in a web worker — relative URLs can't be resolved there.
+  // Set the absolute origin after mount so SSR stays safe.
+  const [narnTilesUrl, setNarnTilesUrl] = useState('');
+  useEffect(() => {
+    setNarnTilesUrl(`${window.location.origin}/api/tiles/narn/{z}/{x}/{y}`);
+  }, []);
 
   const toggleFeed = useCallback((id: FeedId) => {
     setActiveFeeds(prev => ({ ...prev, [id]: !prev[id] }));
@@ -189,7 +193,7 @@ export default function TransitMap() {
         )}
 
         {/* NARN Class I freight rail — vector tiles, color-coded by railroad */}
-        {showClassIFreight && <NarnLayer tilesUrl={NARN_TILES_URL} />}
+        {showClassIFreight && narnTilesUrl && <NarnLayer tilesUrl={narnTilesUrl} />}
 
         {filteredRoutes && filteredRoutes.features.length > 0 && (
           <Source id="routes" type="geojson" data={filteredRoutes}>
